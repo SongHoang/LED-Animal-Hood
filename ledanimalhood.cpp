@@ -1,20 +1,18 @@
 /*
-
 Source code for the LED Animal Spirit Hood
-
 Version 0.1
-
 Author: Song Hoang
-
 Uses Arduino Uno, TLC5947 12-bit PWM, and LSM303C Accelerometer
 
-To-Do 
--  Create quickFlash version 2, decrease brightness according to log(n) versus
+-----To-Do-----
+IN-PROGRESS  Create quickFlash version 2, decrease brightness according to log(n) versus
 version 1 where it's decreasing by 10% every stage
 DONE - Create method to read input from accelerometer and detects sudden change in sensor movement
 - Rewrite quickFlash to use millis() instead of delay()
 - Optimize code to use smaller variables to save memory (u_int8, etc...)
 
+- The faster the accelerometer movement or change, the more intense the color change of the led's will be
+- Make new version of checkForJolt() to use a average threshold of all axis and detect change from that
 */
 
 
@@ -31,21 +29,19 @@ Adafruit_TLC5947 tlc = Adafruit_TLC5947(1,5,4,6);
 LiquidCrystal lcd(7, 8, 9, 10, 11 , 12);
 LSM303C imu;
 
-
 unsigned long ledMillis = 469;
 unsigned long currentMillis = 0;
 unsigned long previousMillis = 0;
 
 int LEDMode = 0;
-
 int LEDValue[8][3];
-
 int doNotWrite = 0;
-
 double bpm = 0;
 
 int accValues [100][3];
 int accPosition = 0;
+int brightness = 16; // 16 is max brightness
+int beatsCounted = 0;
 
 void setup(){
 
@@ -56,13 +52,13 @@ void setup(){
                       MAG_OMZ_HIGH_PERFORMANCE,MAG_MD_CONTINUOUS,ACC_FS_2g,
                       ACC_BDU_ENABLE,ACC_X_ENABLE|ACC_Y_ENABLE|ACC_Z_ENABLE,ACC_ODR_100_Hz);
 
+  // Set initial colors for LED's
     for(int i = 0; i < 8; i++){
       LEDValue[i][0] = 4000;
       LEDValue[i][1] = 1000;
       LEDValue[i][2] = 4000;
       tlc.setLED(i, LEDValue[i][0], LEDValue[i][1] , 
           LEDValue[i][2]);
-
     }
 
     for(int i = 0; i < 100; i++){
@@ -78,14 +74,16 @@ void loop(){
   //displayText();
   //rainbow(10);
   //quickFlash();
-  saveAccVal();
-  checkForJolt();
+  //saveAccVal();
+
+  if(checkMillisBPM()){
+    quickFlash();
+  }
 
 }
 
 // Reads and saves Accelerometer values to accValues array
 void saveAccVal(){
-
   if(accPosition == 101){
     accPosition = 0;
   }
@@ -93,7 +91,6 @@ void saveAccVal(){
   accValues[accPosition][0] = imu.readAccelX();
   accValues[accPosition][1] = imu.readAccelY();
   accValues[accPosition][2] = imu.readAccelZ();
-
   accPosition++;
 
   if(accPosition == 101){
@@ -106,12 +103,11 @@ void saveAccVal(){
 int checkForJolt(){
 
   int val;
-  int thres = 200;
+  int thres = 980;
   int period = 5;
-
+  int range = 200;
 
   if(accValues[accPosition][2] > thres){
-
     if(accPosition < period){
       val = 100 - accPosition;
     }
@@ -119,18 +115,15 @@ int checkForJolt(){
       val = accPosition - period;
     }
 
-    if(accValues[val][2] < -thres){
-      quickFlash();
+    if(accValues[val][2] > thres + range ){
       return 1;
     }
     else{
       return 0;
     }
-
   }
 
   else if(accValues[accPosition][2] < -thres){
-
     if(accPosition < period){
       val = 100 - accPosition;
     }
@@ -138,20 +131,13 @@ int checkForJolt(){
       val = accPosition - period;
     }
 
-    if(accValues[val][2] > thres){
-      quickFlash();
+    if(accValues[val][2] < thres - range){
       return 1;
     }
     else{
       return 0;
     }
-
   }
-
-}
-
-void test(){
-
 }
 
 void check(){
@@ -162,6 +148,7 @@ void check(){
       quickFlash();
     }
 }
+
 // Fades LED brightness to 0, then back to normal again, similar to a music beat
 // Adjust variables named smooth, power1, and delayTime to adjust Flash
 void quickFlash(){
@@ -172,17 +159,17 @@ void quickFlash(){
   int savedMillis;
   double power1 = 0.1;
   double power = 1 - power1;
-  int delayTime = 2.7; // in milliseconds
-
+  int delayTime = 10; // in milliseconds
 
   for(int i = 1; i < smooth + 1; i++){
     for(int j = 0; j < 8; j++){
 
       tlc.setLED(j, LEDValue[j][0] * power, LEDValue[j][1] * power, 
         LEDValue[j][2] * power);
-      delay(delayTime);
+      
       
     }
+    delay(delayTime);
     power = power - power1;
     tlc.write();
     
@@ -193,8 +180,45 @@ void quickFlash(){
   delay(delayTime);
 
   // Go back to full brightness of color
-
   for(int i = smooth; i > 0; i--){
+    for(int j = 0; j < 8; j++){
+      tlc.setLED(j, LEDValue[j][0] * power, LEDValue[j][1] * power, 
+        LEDValue[j][2] * power);
+      
+    }
+    delay(delayTime);
+    power = power + power1;
+    tlc.write();
+    
+  }
+  doNotWrite = 0;
+}
+
+// Version 2 of quickflash, -(x^5+1) decrease of brightness
+void quickFlash2(){
+  float power = 1;
+  float x = 0;
+  float k = 0;
+  int delayTime = 1;
+  for(int i = 1; i < 10; i++){
+      for(int j = 0; j < 8; j++){
+
+        tlc.setLED(j, LEDValue[j][0] * power, LEDValue[j][1] * power, 
+          LEDValue[j][2] * power);
+        delay(delayTime);
+        
+      }
+      k += .1;
+      power = pow(-k, 5) + 1; // Check this function later, not decreasing properly
+
+      tlc.write();
+      
+    }
+
+    delay(delayTime);
+    k = 0;
+
+  for(int i = 10; i > 0; i--){
     for(int j = 0; j < 8; j++){
 
       tlc.setLED(j, LEDValue[j][0] * power, LEDValue[j][1] * power, 
@@ -202,15 +226,14 @@ void quickFlash(){
       delay(delayTime);
       
     }
-    power = power + power1;
+    k += .1;
+    power = pow(k, 5);
     tlc.write();
     
   }
-
-  doNotWrite = 0;
-
-
 }
+
+
 
 // Set all LED's to 0, or no light
 void darkness(){
@@ -222,7 +245,6 @@ void darkness(){
 
 
 void writeLED(int ledNum, int r, int g, int b){
-
   LEDValue[ledNum][0] = r;
   LEDValue[ledNum][1] = g;
   LEDValue[ledNum][2] = b;
@@ -230,13 +252,11 @@ void writeLED(int ledNum, int r, int g, int b){
     tlc.setLED(ledNum, r, g, b);
     tlc.write();
   }
-
 }
 
 void displayText(double num){
   lcd.setCursor(0,1);
   lcd.print(num);
-  
 }
 
 // LED's in the sleeves undergo a rainbow color effect, displaying all colors
@@ -260,8 +280,6 @@ void rainbow(int interval){
     }
     check();
   }
-
-
 }
 
 
@@ -291,5 +309,28 @@ void Wheel(uint8_t ledn, uint16_t WheelPos) {
   } else {
     WheelPos -= 2731;
     writeLED(ledn, 0, 3*WheelPos, 4095 - 3*WheelPos);
+  }
+}
+
+void setBrightness(int num){
+  if(num > 0 && num < 17){
+  brightness = num;
+  }
+}
+
+int checkMillisBPM(){
+  int bpm = 469;
+  currentMillis = millis();
+  if (currentMillis > previousMillis + bpm){
+    previousMillis = currentMillis;
+    beatsCounted++;
+    if(beatsCounted == 128){
+      previousMillis -= 32;
+      beatsCounted = 0;
+    }
+    return 1;
+  }
+  else{
+    return 0;
   }
 }
